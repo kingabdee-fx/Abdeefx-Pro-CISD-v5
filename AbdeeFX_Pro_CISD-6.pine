@@ -1,0 +1,131 @@
+//@version=5
+indicator("AbdeeFX Pro CISD", shorttitle="AbdeeFX Pro CISD", overlay=true, max_lines_count=500)
+
+// ─────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────
+grpLogic = "CISD Logic"
+lookback = input.int(10, "Swing / Liquidity Lookback (bars)", minval=1, group=grpLogic,
+     tooltip="A sweep/touch occurs when price trades at or beyond the lowest low / highest high of the previous N bars.")
+maxWait  = input.int(30, "Max Bars to Wait for CISD", minval=1, group=grpLogic,
+     tooltip="Setup expires if no CISD occurs within this many bars after the sweep.")
+
+grpStyle  = "Style"
+bullColor = input.color(color.new(#00c853, 0), "Bullish Color", group=grpStyle)
+bearColor = input.color(color.new(#ff1744, 0), "Bearish Color", group=grpStyle)
+lineStyleInput = input.string("Dashed", "Line Style", options=["Solid", "Dashed", "Dotted"], group=grpStyle)
+lineWidth = input.int(1, "Line Width", minval=1, maxval=4, group=grpStyle)
+arrowSize = input.string("mini", "Arrow Size",
+     options=["mini", size.tiny, size.small, size.normal, size.large, size.huge], group=grpStyle)
+arrowGap  = input.float(0.05, "Arrow Distance from Candle (x ATR)", minval=0.0, step=0.01, group=grpStyle,
+     tooltip="0 = touching the wick. Higher = further from the candle.")
+
+lineStyle = switch lineStyleInput
+    "Solid"  => line.style_solid
+    "Dotted" => line.style_dotted
+    => line.style_dashed
+
+// ─────────────────────────────────────────────
+// Candle series tracking
+// ─────────────────────────────────────────────
+isBear = close < open
+isBull = close > open
+
+// Highest Open of the most recent bearish series (consecutive down candles)
+var float bearTop    = na
+var int   bearTopIdx = na
+// Lowest Open of the most recent bullish series (consecutive up candles)
+var float bullBottom    = na
+var int   bullBottomIdx = na
+
+if isBear
+    if isBear[1]
+        if open > bearTop
+            bearTop    := open
+            bearTopIdx := bar_index
+    else
+        bearTop    := open
+        bearTopIdx := bar_index
+
+if isBull
+    if isBull[1]
+        if open < bullBottom
+            bullBottom    := open
+            bullBottomIdx := bar_index
+    else
+        bullBottom    := open
+        bullBottomIdx := bar_index
+
+// ─────────────────────────────────────────────
+// Liquidity sweep / swing touch detection
+// ─────────────────────────────────────────────
+sweepLow  = low  <= ta.lowest(low, lookback)[1]
+sweepHigh = high >= ta.highest(high, lookback)[1]
+
+// ─────────────────────────────────────────────
+// Setup state
+// ─────────────────────────────────────────────
+var bool  bullArmed  = false
+var float bullRef    = na
+var int   bullRefIdx = na
+var int   bullArmBar = na
+
+var bool  bearArmed  = false
+var float bearRef    = na
+var int   bearRefIdx = na
+var int   bearArmBar = na
+
+// Expire stale setups
+if bullArmed and bar_index - bullArmBar > maxWait
+    bullArmed := false
+if bearArmed and bar_index - bearArmBar > maxWait
+    bearArmed := false
+
+// ─────────────────────────────────────────────
+// CISD triggers (evaluated on a bar AFTER the sweep)
+// ─────────────────────────────────────────────
+bullCISD = bullArmed and isBull and close > bullRef
+bearCISD = bearArmed and isBear and close < bearRef
+
+if bullCISD
+    line.new(bullRefIdx, bullRef, bar_index, bullRef,
+         color=bullColor, style=lineStyle, width=lineWidth)
+    bullArmed := false
+else if sweepLow and not na(bearTop)
+    bullArmed  := true
+    bullRef    := bearTop
+    bullRefIdx := bearTopIdx
+    bullArmBar := bar_index
+
+if bearCISD
+    line.new(bearRefIdx, bearRef, bar_index, bearRef,
+         color=bearColor, style=lineStyle, width=lineWidth)
+    bearArmed := false
+else if sweepHigh and not na(bullBottom)
+    bearArmed  := true
+    bearRef    := bullBottom
+    bearRefIdx := bullBottomIdx
+    bearArmBar := bar_index
+
+// ─────────────────────────────────────────────
+// Shapes
+// ─────────────────────────────────────────────
+// Arrows are placed at an absolute price just beyond the wick, so they sit close to the candle.
+// "mini" uses a small text glyph; other sizes use plotshape (sizes must be constants, hence one call per size).
+gap  = ta.atr(14) * arrowGap
+bullY = low  - gap
+bearY = high + gap
+
+plotchar(bullCISD and arrowSize == "mini" ? bullY : na, title="Bullish CISD (mini)", char="▴", location=location.absolute, color=bullColor, size=size.tiny)
+plotshape(bullCISD and arrowSize == size.tiny ? bullY : na, title="Bullish CISD tiny", style=shape.triangleup, location=location.absolute, color=bullColor, size=size.tiny)
+plotshape(bullCISD and arrowSize == size.small ? bullY : na, title="Bullish CISD small", style=shape.triangleup, location=location.absolute, color=bullColor, size=size.small)
+plotshape(bullCISD and arrowSize == size.normal ? bullY : na, title="Bullish CISD normal", style=shape.triangleup, location=location.absolute, color=bullColor, size=size.normal)
+plotshape(bullCISD and arrowSize == size.large ? bullY : na, title="Bullish CISD large", style=shape.triangleup, location=location.absolute, color=bullColor, size=size.large)
+plotshape(bullCISD and arrowSize == size.huge ? bullY : na, title="Bullish CISD huge", style=shape.triangleup, location=location.absolute, color=bullColor, size=size.huge)
+
+plotchar(bearCISD and arrowSize == "mini" ? bearY : na, title="Bearish CISD (mini)", char="▾", location=location.absolute, color=bearColor, size=size.tiny)
+plotshape(bearCISD and arrowSize == size.tiny ? bearY : na, title="Bearish CISD tiny", style=shape.triangledown, location=location.absolute, color=bearColor, size=size.tiny)
+plotshape(bearCISD and arrowSize == size.small ? bearY : na, title="Bearish CISD small", style=shape.triangledown, location=location.absolute, color=bearColor, size=size.small)
+plotshape(bearCISD and arrowSize == size.normal ? bearY : na, title="Bearish CISD normal", style=shape.triangledown, location=location.absolute, color=bearColor, size=size.normal)
+plotshape(bearCISD and arrowSize == size.large ? bearY : na, title="Bearish CISD large", style=shape.triangledown, location=location.absolute, color=bearColor, size=size.large)
+plotshape(bearCISD and arrowSize == size.huge ? bearY : na, title="Bearish CISD huge", style=shape.triangledown, location=location.absolute, color=bearColor, size=size.huge)
